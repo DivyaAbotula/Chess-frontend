@@ -238,6 +238,12 @@ li {
   width: 100%;
 }
 
+.btn--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* SECTION 6: MAIN CONTENT LAYOUT */
 .main-container {
   display: grid;
@@ -288,6 +294,33 @@ li {
   pointer-events: none;
   z-index: 10;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.board__overlay--result {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.92), rgba(59, 130, 246, 0.92));
+  padding: var(--space-2xl) var(--space-xl);
+  border-radius: var(--border-radius-lg);
+  border: 3px solid var(--color-primary);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  animation: slideDown 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  letter-spacing: 0.05em;
+  text-align: center;
+  max-width: 400px;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) translateY(0);
+  }
 }
 
 .game-status {
@@ -1122,4 +1155,7 @@ dialog[open] {
 .sound-off {
   opacity: 0.7;
   transform: none;
+}
+.timer-btn{
+  background-color: #b58863;
 }

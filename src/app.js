@@ -171,7 +171,9 @@ function _onTimeOut(side) {
   pauseTimer();
   const winner = side === 'w' ? 'Black' : 'White';
   boardMessageEl.textContent = `${winner} wins on time`;
+  boardMessageEl.classList.add('board__overlay--result');
   statusEl.textContent = `${winner} wins on time`;
+  undoBtn.classList.add('btn--disabled');
 }
 
 function startTimer() {
@@ -309,6 +311,7 @@ function newGame() {
   // reset and start clocks for a new game
   resetTimer(DEFAULT_MINUTES);
   startTimer();
+  undoBtn.classList.remove('btn--disabled');
   updateStatus();
 }
 
@@ -765,9 +768,13 @@ function updateStatus() {
       ? (turn === 'w' ? 'Black Wins by Checkmate' : 'White Wins by Checkmate')
       : 'Stalemate';
     boardMessageEl.textContent = msg;
+    boardMessageEl.classList.add('board__overlay--result');
     statusEl.textContent = msg;
+    pauseTimer();
+    undoBtn.classList.add('btn--disabled');
   } else {
     boardMessageEl.textContent = '';
+    boardMessageEl.classList.remove('board__overlay--result');
     statusEl.textContent = `${turn === 'w' ? 'White' : 'Black'} to move${inCheck ? ' — Check!' : ''}`;
   }
 }
@@ -811,8 +818,10 @@ if (resignBtn) {
   resignBtn.addEventListener('click', () => {
     pauseTimer();
     const winner = turn === 'w' ? 'Black' : 'White';
-    boardMessageEl.textContent = `${turn === 'w' ? 'White' : 'Black'} resigned — ${winner} wins.`;
+    boardMessageEl.textContent = `${turn === 'w' ? 'White' : 'Black'} resigned — ${winner} wins`;
+    boardMessageEl.classList.add('board__overlay--result');
     statusEl.textContent = `${winner} wins by resignation`;
+    undoBtn.classList.add('btn--disabled');
   });
 }
 
@@ -820,7 +829,9 @@ if (drawBtn) {
   drawBtn.addEventListener('click', () => {
     pauseTimer();
     boardMessageEl.textContent = 'Game drawn by agreement';
+    boardMessageEl.classList.add('board__overlay--result');
     statusEl.textContent = 'Draw';
+    undoBtn.classList.add('btn--disabled');
   });
 }
 // Sound toggle button
