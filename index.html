@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pro Chess — Master Your Game</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="./styles/main.css" />
+</head>
+
+<body>
+<div id="app">
+
+<!-- HEADER / NAVIGATION -->
+<header class="header">
+  <div class="header__container">
+    <div class="header__brand">
+      <h1 class="header__title">♟ Pro Chess</h1>
+      <p class="header__subtitle">Master Your Game</p>
+    </div>
+    
+    <nav class="header__nav">
+      <button class="btn btn--primary" id="new-game">🆕 New Game</button>
+      <button class="btn btn--secondary" id="undo">↶ Undo</button>
+      <button class="btn btn--secondary" onclick="document.getElementById('rules-box').showModal()">📖 Rules</button>
+      <button class="btn btn--secondary" id="open-settings">⚙️ Settings</button>
+    </nav>
+  </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="main-container">
+  
+  <!-- LEFT SECTION: BOARD -->
+  <section class="board-section">
+    <div class="board-wrapper">
+      <div class="board__overlay" id="board-message"></div>
+      <div class="board board--high-contrast" id="board"></div>
+    </div>
+    
+    <!-- GAME STATUS BELOW BOARD -->
+    <div class="game-status">
+      <div class="status-display" id="status">White to move</div>
+    </div>
+  </section>
+
+  <!-- RIGHT SECTION: SIDEBAR -->
+  <aside class="game-panel">
+    
+    <!-- EVALUATION BAR -->
+    <section class="eval-section" id="clock-section">
+      <h3 class="section-title">Game Clock</h3>
+      <div class="eval-container clock-container">
+        <div class="clock clock--white">
+          <div class="clock__label">White</div>
+          <div class="clock__time" id="clock-white">05:00</div>
+        </div>
+
+        <div class="clock clock--black">
+          <div class="clock__label">Black</div>
+          <div class="clock__time" id="clock-black">05:00</div>
+        </div>
+
+        <div class="timer-controls">
+          <button class="timer-btn" id="timer-start">Start</button>
+          <button class="timer-btn" id="timer-pause">Pause</button>
+          <button class="timer-btn" id="timer-reset">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MOVE HISTORY -->
+    <section class="moves-section">
+      <h3 class="section-title">Move History</h3>
+      <div class="moves-container">
+        <div class="moves-table" id="moves-table"></div>
+      </div>
+    </section>
+
+    <!-- QUICK ACTIONS -->
+    <section class="actions-section">
+      <h3 class="section-title">Game</h3>
+      <div class="actions-grid">
+        <button class="action-btn" id="resign-btn" title="Resign the game">🏁 Resign</button>
+        <button class="action-btn" id="draw-btn" title="Offer a draw">🤝 Draw</button>
+        <button class="action-btn" id="sound-toggle" title="Toggle sound">🔊 Sound</button>
+      </div>
+    </section>
+
+  </aside>
+
+</main>
+
+<!-- RULES MODAL -->
+<dialog id="rules-box" class="modal">
+  <div class="modal__content rules-content">
+    <button class="modal__close" onclick="document.getElementById('rules-box').close()">✕</button>
+    
+    <h2 class="modal__title">♟ Chess Rules Guide</h2>
+    
+    <div class="rules-grid">
+      <div class="rule-group">
+        <h4>Objective</h4>
+        <p>Checkmate your opponent's king or force them into a draw.</p>
+      </div>
+      
+      <div class="rule-group">
+        <h4>Piece Movement</h4>
+        <ul>
+          <li><strong>♔ King:</strong> One square in any direction</li>
+          <li><strong>♕ Queen:</strong> Any number of squares in any direction</li>
+          <li><strong>♖ Rook:</strong> Horizontally or vertically</li>
+          <li><strong>♗ Bishop:</strong> Diagonally</li>
+          <li><strong>♘ Knight:</strong> L-shape (2+1), can jump over pieces</li>
+          <li><strong>♙ Pawn:</strong> Forward 1 (or 2 on first move), captures diagonally</li>
+        </ul>
+      </div>
+      
+      <div class="rule-group">
+        <h4>Special Rules</h4>
+        <ul>
+          <li><strong>Check:</strong> King is under attack</li>
+          <li><strong>Checkmate:</strong> King in check with no escape</li>
+          <li><strong>Stalemate:</strong> No legal moves but not in check (draw)</li>
+          <li><strong>Castling:</strong> Not yet implemented</li>
+          <li><strong>En Passant:</strong> Not yet implemented</li>
+          <li><strong>Promotion:</strong> Not yet implemented</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- SETTINGS MODAL -->
+<div id="settings-popup" class="modal-overlay settings-popup settings-popup--hidden">
+  <div class="modal__content settings-panel">
+    <button class="modal__close" onclick="document.getElementById('close-settings').click()">✕</button>
+    
+    <h2 class="modal__title">⚙️ Settings</h2>
+
+    <!-- Theme Settings -->
+    <div class="settings-section">
+      <h3 class="settings-section__title">🎨 Board Theme</h3>
+      <div class="color-grid" id="board-themes">
+        <div class="color-item" data-theme="classic" style="background:linear-gradient(135deg, #f0d9b5 0%, #b58863 100%)" title="Classic"></div>
+        <div class="color-item" data-theme="high-contrast" style="background:linear-gradient(135deg, #ffffff 0%, #2b5323 100%)" title="High Contrast"></div>
+        <div class="color-item" data-theme="cbf" style="background:linear-gradient(135deg, #fff2d9 0%, #1f4f8b 100%)" title="Color-blind Friendly"></div>
+        <div class="color-item" data-theme="mono" style="background:linear-gradient(135deg, #ffffff 0%, #524b4b 100%)" title="Monochrome"></div>
+      </div>
+    </div>
+
+    <!-- Background Settings -->
+    <div class="settings-section">
+      <h3 class="settings-section__title">🌈 Background</h3>
+      <div class="color-grid" id="bg-colors">
+        <div class="color-item" data-bg="#0b1220" style="background:#0b1220" title="Dark Blue"></div>
+        <div class="color-item" data-bg="#1b1b1b" style="background:#433131" title="Brown"></div>
+        <div class="color-item" data-bg="#102030" style="background:#385879" title="Navy"></div>
+        <div class="color-item" data-bg="#222831" style="background:#abb6c7" title="Gray"></div>
+      </div>
+    </div>
+
+    <!-- Piece Settings -->
+    <div class="settings-section">
+      <h3 class="settings-section__title">♞ Piece Style</h3>
+      <div class="piece-grid" id="piece-style">
+        <div class="piece-item" data-piece="neo">Modern</div>
+        <div class="piece-item" data-piece="wood">Classic</div>
+      </div>
+    </div>
+
+    <button id="close-settings" class="btn btn--primary btn--full">Close Settings</button>
+  </div>
+</div>
+
+<script type="module" src="./src/app.js"></script>
+
+</div>
+</body>
+</html>

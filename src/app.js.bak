@@ -1,0 +1,713 @@
+/* ========== Pro Chess — Single-file app.js (modular style) ========== */
+/* This is written as a single module for easy paste. You may split it into files later. */
+let currentPieceSet = localStorage.getItem("pieceStyle") || "neo";
+
+const boardEl = document.getElementById('board');
+const moveListEl = document.getElementById('moves-table');
+const evalFillEl = document.getElementById('eval-fill');
+const evalTextEl = document.getElementById('eval-text');
+const suggestionEl = document.getElementById('suggestion');
+const statusEl = document.getElementById('status');
+
+document.getElementById('new-game').addEventListener('click', newGame);
+document.getElementById('undo').addEventListener('click', undo);
+
+
+// call this after the DOM buttons exist (top of app.js after element queries)
+document.querySelectorAll('.theme-controls button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const t = btn.dataset.theme;
+    boardEl.classList.remove('classic','high-contrast','cbf','mono');
+    boardEl.classList.add(t);
+    // re-render to ensure coord colors, dots apply
+    renderBoard();
+  });
+});
+
+
+/* -------------------------
+   Board state
+----------------------------*/
+let board = [];
+let turn = 'w'; // 'w' or 'b'
+let historyStack = [];
+let lastMove = null;
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+/* Utilities */
+const PIECE_UNICODE = {
+  K:"♔",Q:"♕",R:"♖",B:"♗",N:"♘",P:"♙",
+  k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"
+};
+
+function parseFEN(fen){
+  const [placement, active] = fen.split(' ');
+  const rows = placement.split('/');
+  const sq = [];
+  for(const r of rows){
+    for(const c of r){
+      if(isNumeric(c)) for(let i=0;i<Number(c);i++) sq.push('');
+      else sq.push(c);
+    }
+  }
+  return {squares: sq, turn: active};
+}
+function isNumeric(c){return !isNaN(Number(c));}
+
+/* Initialize */
+function loadFromFEN(fen){
+  const parsed = parseFEN(fen);
+  board = parsed.squares.slice();
+  turn = parsed.turn === 'w' ? 'w' : 'b';
+  historyStack = [];
+  lastMove = null;
+  renderAll();
+}
+function newGame(){ loadFromFEN(START_FEN); updateStatus(); }
+
+/* -------------------------
+   Rendering
+----------------------------*/
+function renderAll(){
+  renderBoard();
+  renderMoveList();
+  evaluateAndUpdateUI(); // async-evaluation triggered
+  updateStatus();
+}
+
+// place this near your top-level code (after boardEl is defined)
+// default theme:
+const DEFAULT_THEME = 'high-contrast';
+boardEl.classList.add(DEFAULT_THEME);
+
+// updated renderBoard
+function renderBoard(){
+  boardEl.innerHTML = '';
+  for(let i = 0; i < 64; i++){
+    const div = document.createElement('div');
+    const isLight = ((i + Math.floor(i/8)) % 2 === 0);
+    div.className = 'square ' + (isLight ? 'light' : 'dark');
+    div.dataset.i = i;
+
+    // piece
+  if (board[i]) {
+    const img = document.createElement("img");
+    img.className = "piece";
+
+    const p = board[i];
+    const filename = (p === p.toUpperCase())
+                     ? `w${p}.svg`   // white piece → wK.svg
+                     : `b${p.toUpperCase()}.svg`; // black piece → bK.svg
+
+    img.src = `./src/pieces/${currentPieceSet}/${filename}`;
+    div.appendChild(img);
+}
+
+    // coord: show file on bottom-left for ranks and files
+    const file = 'abcdefgh'[i % 8];
+    const rank = 8 - Math.floor(i/8);
+    const coord = document.createElement('div');
+    coord.className = 'coord';
+    // show file only on rank 1 (bottom) and rank on file 'a' (left) for readability
+    // we show both (file+rank) but style small so it's unobtrusive
+    coord.textContent = `${file}${rank}`;
+    div.appendChild(coord);
+
+    // last-move highlight
+    if(lastMove && (lastMove.from === i || lastMove.to === i)){
+      div.classList.add('last-move');
+    }
+
+    // add click handling
+    div.addEventListener('click', onSquareClick);
+
+    boardEl.appendChild(div);
+  }
+
+  // show check on king square if needed
+  const kingIndex = findKing(turn);
+  if (kingIndex >= 0 && isKingInCheck(turn)) {
+    const kingSq = boardEl.querySelector(`[data-i="${kingIndex}"]`);
+    if (kingSq) kingSq.classList.add('in-check');
+  }
+}
+
+
+/* -------------------------
+   Move generation (legal-ish)
+   - Fully supports piece sliding, knights, pawns (including double moves & capture)
+   - Castling, en-passant and promotion can be added later.
+   - Includes check detection to prevent illegal moves into check.
+----------------------------*/
+
+function sameColor(a,b){
+  if(!a || !b) return false;
+  return (a === a.toUpperCase()) === (b === b.toUpperCase());
+}
+function isWhitePiece(p){ return p && p === p.toUpperCase(); }
+function isBlackPiece(p){ return p && p === p.toLowerCase(); }
+
+function generatePseudoMovesForSquare(from){
+  const p = board[from];
+  if(!p) return [];
+  const moves = [];
+  const piece = p.toLowerCase();
+  const isWhite = p === p.toUpperCase();
+  const r = Math.floor(from/8), c = from%8;
+
+  if(piece === 'p'){
+    const dir = isWhite ? -8 : 8;
+    const startRow = isWhite ? 6 : 1;
+    // forward
+    if(!board[from+dir]) moves.push({from,to:from+dir});
+    // double
+    if(r === startRow && !board[from+dir] && !board[from+dir*2]) moves.push({from,to:from+dir*2});
+    // captures
+    for(const dc of [-1,1]){
+      const to = from + dir + dc;
+      if(to>=0 && to<64 && Math.abs((to%8) - c) <=1){
+        if(board[to] && !sameColor(board[to], p)) moves.push({from,to});
+      }
+    }
+    return moves;
+  }
+
+  if(piece === 'n'){
+    const deltas = [15,17,10,6,-15,-17,-10,-6];
+    for(const d of deltas){
+      const to = from + d;
+      if(to<0||to>=64) continue;
+      if(Math.abs((to%8) - c) > 2) continue; // prevent wrap-around (conservative)
+      if(!board[to] || !sameColor(board[to], p)) moves.push({from,to});
+    }
+    return moves;
+  }
+
+  if(piece === 'b' || piece === 'r' || piece === 'q'){
+    const dirs = piece==='b' ? [9,7,-9,-7] : piece==='r' ? [8,-8,1,-1] : [8,-8,1,-1,9,7,-9,-7];
+    for(const d of dirs){
+      let to = from + d;
+      while(to>=0 && to<64){
+        // break on wraparound for horizontal moves
+        if(Math.abs((to%8) - ((to-d)%8)) > 1 && (d === 1 || d === -1 || d === 9 || d === -7 || d === -9 || d === 7)) break;
+        if(!board[to]){
+          moves.push({from,to});
+        } else {
+          if(!sameColor(board[to], p)) moves.push({from,to});
+          break;
+        }
+        to += d;
+      }
+    }
+    return moves;
+  }
+
+  if(piece === 'k'){
+    const deltas = [8,-8,1,-1,9,7,-9,-7];
+    for(const d of deltas){
+      const to = from + d;
+      if(to<0||to>=64) continue;
+      if(Math.abs((to%8) - c) > 1) continue;
+      if(!board[to] || !sameColor(board[to], p)) moves.push({from,to});
+    }
+    // castling (simple check for empty squares; no check validation here)
+    // can be extended later
+    return moves;
+  }
+
+  return moves;
+}
+
+
+/* -------------------------
+   Check detection
+----------------------------*/
+function findKing(color){
+  const kingChar = color === 'w' ? 'K' : 'k';
+  for(let i=0;i<64;i++) if(board[i] === kingChar) return i;
+  return -1;
+}
+
+function isSquareAttacked(sq, byColor){
+  // check all opponent pieces' pseudo moves to see if they attack sq
+  for(let i=0;i<64;i++){
+    const p = board[i];
+    if(!p) continue;
+    if(byColor==='w' && !isWhitePiece(p)) continue;
+    if(byColor==='b' && !isBlackPiece(p)) continue;
+    const cand = generatePseudoMovesForSquare(i);
+    if(cand.some(m => m.to === sq)) return true;
+  }
+  return false;
+}
+
+function isKingInCheck(color){
+  const kingSq = findKing(color);
+  if(kingSq < 0) return false; // no king? treat as not in check
+  const opponent = color === 'w' ? 'b' : 'w';
+  return isSquareAttacked(kingSq, opponent);
+}
+
+/* -------------------------
+   Move making / undo
+----------------------------*/
+function makeMove(move){
+  // store snapshot minimal for undo
+  historyStack.push({from:move.from, to:move.to, moved: board[move.from], captured: board[move.to], lastMove:lastMove});
+  board[move.to] = board[move.from];
+  board[move.from] = '';
+  lastMove = {from: move.from, to: move.to};
+  turn = turn === 'w' ? 'b' : 'w';
+  renderAll();
+}
+
+function undo(){
+  if(historyStack.length === 0) return;
+  const snap = historyStack.pop();
+  board[snap.from] = snap.moved;
+  board[snap.to] = snap.captured;
+  lastMove = snap.lastMove;
+  turn = turn === 'w' ? 'b' : 'w';
+  renderAll();
+}
+
+/* -------------------------
+   Evaluation (simple material + mobility)
+   Returns centipawns score from White's perspective (+ = White advantage)
+   We'll show this as CP and as text in UI
+   Non-blocking: heavy loops are wrapped in setTimeout when needed.
+----------------------------*/
+function materialScore(){
+  const values = {p:100,n:320,b:330,r:500,q:900,k:20000};
+  let score = 0;
+  for(const p of board){
+    if(!p) continue;
+    const v = values[p.toLowerCase()] || 0;
+    score += (p === p.toUpperCase()) ? v : -v;
+  }
+  return score;
+}
+
+function mobilityScore(){
+  // rough mobility: number of legal moves for each side * 10
+  const wMoves = generateAllLegalMoves('w').length;
+  const bMoves = generateAllLegalMoves('b').length;
+  return (wMoves - bMoves) * 10;
+}
+
+function evaluatePosition(){
+  // simple combination
+  return materialScore() + mobilityScore();
+}
+
+/* Update UI evaluation bar and text from White POV */
+function updateEvalUI(cp){
+  // cp is centipawns from White POV
+  const clamp = Math.max(-2000, Math.min(2000, cp)); // clamp for UI
+  // map cp range [-2000,2000] to bottom% for white advantage fill
+  const ratio = (clamp + 2000) / 4000; // 0..1 where 1 => big white advantage
+  // eval fill uses bottom and height
+  const heightPercent = Math.max(2, Math.min(98, ratio * 100));
+  evalFillEl.style.height = heightPercent + '%';
+  evalFillEl.style.bottom = (50 - (heightPercent / 2)) + '%';
+  // nice text
+  if(Math.abs(cp) < 40) evalTextEl.textContent = 'Equal';
+  else if(cp >= 40) evalTextEl.textContent = `White +${Math.round(cp)}`;
+  else evalTextEl.textContent = `Black +${Math.round(-cp)}`;
+}
+
+/* Non-blocking evaluation wrapper */
+let evalTimer = null;
+function evaluateAndUpdateUI(){
+  if(evalTimer) clearTimeout(evalTimer);
+  evalTimer = setTimeout(()=> {
+    const cp = evaluatePosition();
+    updateEvalUI(cp);
+    renderMoveList(); // refresh scores next to moves
+  }, 20);
+}
+
+/* -------------------------
+   Move list with scoring
+   We'll store algebraic simple text like e2e4 and show evaluation after each move
+----------------------------*/
+function formatMove(m){ // simple coordinate style
+  return indexToSquare(m.from) + indexToSquare(m.to);
+}
+function renderMoveWithPiece(move) {
+  if (!move) return "";
+
+  const piece = board[move.to]; // piece after the move
+  const pieceTheme = localStorage.getItem("pieceTheme") || "classic";
+
+  return `
+    ${indexToSquare(move.from)} → ${indexToSquare(move.to)}
+  `;
+}
+
+function indexToSquare(i){
+  const file = 'abcdefgh'[i%8];
+  const rank = 8 - Math.floor(i/8);
+  return `${file}${rank}`;
+}
+function renderMoveList() {
+  const container = document.getElementById("moves-table");
+  container.innerHTML = "";
+
+  const moves = historyStack.map(m => ({
+    from: m.from,
+    to: m.to,
+    san: formatMove(m)
+  }));
+
+  for (let i = 0; i < moves.length; i += 2) {
+    const row = document.createElement("div");
+    row.className = "move-row";
+
+    const moveNum = Math.floor(i / 2) + 1;
+
+    const whiteMove = moves[i] ? moves[i] : null;
+    const blackMove = moves[i + 1] ? moves[i + 1] : null;
+
+    row.innerHTML = `
+      <div class="move-number">${moveNum}.</div>
+      <div class="move-white">${renderMoveWithPiece(whiteMove)}</div>
+      <div class="move-black">${renderMoveWithPiece(blackMove)}</div>
+    `;
+
+    container.appendChild(row);
+  }
+}
+
+async function computeScoresForHistory(){
+  // create a temp board and apply moves one by one, computing evaluation after each
+  const temp = startBoardFromFEN(START_FEN);
+  const scores = [];
+  for(let i=0;i<historyStack.length;i++){
+    const s = historyStack[i];
+    temp[s.to] = temp[s.from];
+    temp[s.from] = '';
+    // compute material quickly
+    const sc = quickEvaluate(temp);
+    scores.push(sc);
+  }
+  // apply scores to DOM
+  const allScoreEls = document.querySelectorAll('.move-score');
+  allScoreEls.forEach(el => {
+    const idx = Number(el.dataset.idx);
+    const sc = scores[idx];
+    if(sc === undefined) el.textContent = '';
+    else {
+      const txt = sc === 0 ? '0' : (sc>0 ? `+${Math.round(sc)}` : `${Math.round(sc)}`);
+      el.textContent = txt;
+    }
+  });
+}
+
+/* quickEvaluate uses same values as materialScore but takes a board array */
+function quickEvaluate(tmpBoard){
+  const values = {p:100,n:320,b:330,r:500,q:900,k:20000};
+  let s = 0;
+  for(const p of tmpBoard){
+    if(!p) continue;
+    const v = values[p.toLowerCase()] || 0;
+    s += (p === p.toUpperCase()) ? v : -v;
+  }
+  return s;
+}
+function startBoardFromFEN(fen){
+  return parseFEN(fen).squares.slice();
+}
+
+
+/* generate moves on arbitrary board (used for suggestion) */
+function generateAllLegalMovesOn(tmpBoard, color){
+  // simplified: use pseudo moves and no check-filter to speed up — acceptable for quick suggestions
+  const moves = [];
+  for(let i=0;i<64;i++){
+    const p = tmpBoard[i];
+    if(!p) continue;
+    if(color === 'w' && !(p === p.toUpperCase())) continue;
+    if(color === 'b' && !(p === p.toLowerCase())) continue;
+    // use same pseudo generator but refer to tmpBoard
+    const local = generatePseudoMovesForSquareOn(tmpBoard, i);
+    for(const m of local){
+      // capture own? filter
+      if(tmpBoard[m.to] && ((p === p.toUpperCase()) === (tmpBoard[m.to] === tmpBoard[m.to].toUpperCase()))) continue;
+      moves.push(m);
+    }
+  }
+  return moves;
+}
+
+function generatePseudoMovesForSquareOn(tmp, from){
+  const p = tmp[from];
+  if(!p) return [];
+  const moves = [];
+  const piece = p.toLowerCase();
+  const isWhite = p === p.toUpperCase();
+  const r = Math.floor(from/8), c = from%8;
+
+  if(piece === 'p'){
+    const dir = isWhite ? -8 : 8;
+    if(!tmp[from+dir]) moves.push({from,to:from+dir});
+    if((isWhite && r===6) || (!isWhite && r===1)){
+      if(!tmp[from+dir] && !tmp[from+dir*2]) moves.push({from,to:from+dir*2});
+    }
+    for(const dc of [-1,1]){
+      const to = from + dir + dc;
+      if(to>=0 && to<64 && Math.abs((to%8) - c) <=1){
+        if(tmp[to] && !( (p === p.toUpperCase()) === (tmp[to] === tmp[to].toUpperCase()) )) moves.push({from,to});
+      }
+    }
+    return moves;
+  }
+  if(piece === 'n'){
+    const deltas = [15,17,10,6,-15,-17,-10,-6];
+    for(const d of deltas){
+      const to = from + d;
+      if(to<0||to>=64) continue;
+      if(Math.abs((to%8) - c) > 2) continue;
+      if(!tmp[to] || !((p===p.toUpperCase()) === (tmp[to]===tmp[to].toUpperCase()))) moves.push({from,to});
+    }
+    return moves;
+  }
+  if(piece === 'b' || piece === 'r' || piece === 'q'){
+    const dirs = piece==='b' ? [9,7,-9,-7] : piece==='r' ? [8,-8,1,-1] : [8,-8,1,-1,9,7,-9,-7];
+    for(const d of dirs){
+      let to = from + d;
+      while(to>=0 && to<64){
+        if(Math.abs((to%8) - ((to-d)%8)) > 1 && (d === 1 || d === -1 || d === 9 || d === -7 || d === -9 || d === 7)) break;
+        if(!tmp[to]) moves.push({from,to});
+        else {
+          if(!((p===p.toUpperCase()) === (tmp[to]===tmp[to].toUpperCase()))) moves.push({from,to});
+          break;
+        }
+        to += d;
+      }
+    }
+    return moves;
+  }
+  if(piece === 'k'){
+    const deltas = [8,-8,1,-1,9,7,-9,-7];
+    for(const d of deltas){
+      const to = from + d;
+      if(to<0||to>=64) continue;
+      if(Math.abs((to%8) - c) > 1) continue;
+      if(!tmp[to] || !((p===p.toUpperCase()) === (tmp[to]===tmp[to].toUpperCase()))) moves.push({from,to});
+    }
+    return moves;
+  }
+  return [];
+}
+
+/* -------------------------
+   UI interactions: click squares and move selection
+----------------------------*/
+let selectedSquare = null;
+function onSquareClick(e){
+  const idx = Number(e.currentTarget.dataset.i);
+  const p = board[idx];
+  // if selecting own piece
+  if(selectedSquare === null){
+    if(!p) return;
+    if((turn === 'w' && p !== p.toUpperCase()) || (turn === 'b' && p !== p.toLowerCase())) return;
+    selectedSquare = idx;
+    highlightLegalMoves(idx);
+    return;
+  }
+
+  // if clicking same -> deselect
+  if(selectedSquare === idx){
+    selectedSquare = null;
+    clearHighlights();
+    return;
+  }
+
+  // attempt move
+  const legal = generateAllLegalMoves(turn);
+  const chosen = legal.find(m => m.from === selectedSquare && m.to === idx);
+  if(chosen){
+    makeMove(chosen);
+  } else {
+    // if clicked on another own piece, change selection
+    if(p && ((turn==='w' && p === p.toUpperCase()) || (turn==='b' && p === p.toLowerCase()))){
+      selectedSquare = idx;
+      highlightLegalMoves(idx);
+      return;
+    }
+  }
+  selectedSquare = null;
+  clearHighlights();
+}
+
+function clearHighlights(){
+  document.querySelectorAll('.square').forEach(s => {
+    s.classList.remove('selected');
+    s.classList.remove('move-dot');
+  });
+}
+
+
+function highlightLegalMoves(from){
+  clearHighlights();
+
+  const legal = generateAllLegalMoves(turn)
+    .filter(m => m.from === from)
+    .map(m => m.to);
+
+  for(const to of legal){
+    const sq = boardEl.querySelector(`[data-i="${to}"]`);
+    if(sq){
+      sq.classList.add("move-dot");
+    }
+  }
+
+  // highlight selected square
+  const sel = boardEl.querySelector(`[data-i="${from}"]`);
+  if(sel) sel.classList.add("selected");
+}
+
+
+/* -------------------------
+   Status and helpers
+----------------------------*/
+function updateStatus() {
+  const inCheck = isKingInCheck(turn);
+  const moves = generateAllLegalMoves(turn);
+  const msgEl = document.getElementById("board-message");
+
+  if (moves.length === 0) {
+    let msg = inCheck
+      ? (turn === "w" ? "Black Wins by Checkmate" : "White Wins by Checkmate")
+      : "Stalemate";
+
+    msgEl.textContent = msg;     // over the board
+    statusEl.textContent = msg;  // below the board
+  } else {
+    msgEl.textContent = "";      // clear board message
+    statusEl.textContent =
+      `${turn === "w" ? "White" : "Black"} to move${inCheck ? " — Check!" : ""}`;
+  }
+}
+
+
+/* -------------------------
+   Utility: find legal moves (uses earlier functions)
+----------------------------*/
+function generateAllLegalMoves(color){
+  const moves = [];
+  for(let i=0;i<64;i++){
+    const p = board[i];
+    if(!p) continue;
+    if(color === 'w' && !isWhitePiece(p)) continue;
+    if(color === 'b' && !isBlackPiece(p)) continue;
+    const cand = generatePseudoMovesForSquare(i);
+    for(const m of cand){
+      // make move on board, check if king in check
+      const from = m.from, to = m.to;
+      const saveFrom = board[from], saveTo = board[to];
+      board[to] = board[from];
+      board[from] = '';
+      const inCheck = isKingInCheck(color);
+      board[from] = saveFrom; board[to] = saveTo;
+      if(!inCheck) moves.push(m);
+    }
+  }
+  return moves;
+}
+
+/* -------------------------
+   Game start & helpers
+----------------------------*/
+function setBoardArray(arr){
+  board = arr.slice();
+}
+function makeMoveFromCoords(fromIdx, toIdx){
+  makeMove({from:fromIdx,to:toIdx});
+}
+
+
+/* -------------------------
+   Boot
+----------------------------*/
+loadFromFEN(START_FEN);
+/* ===============================
+      SETTINGS FUNCTIONALITY
+================================*/
+
+const settingsPopup = document.getElementById("settings-popup");
+const openSettingsBtn = document.getElementById("open-settings");
+const closeSettingsBtn = document.getElementById("close-settings");
+
+/* Open + Close */
+openSettingsBtn.onclick = () => settingsPopup.classList.remove("hidden");
+closeSettingsBtn.onclick = () => settingsPopup.classList.add("hidden");
+
+/* ------------------------------
+   1. BACKGROUND COLOR PICKER
+------------------------------ */
+document.querySelectorAll("#bg-colors .color-item").forEach(item => {
+  item.addEventListener("click", () => {
+    const bg = item.dataset.bg;
+    document.body.style.background = bg;
+
+    localStorage.setItem("bgColor", bg);
+  });
+});
+
+/* Load background on startup */
+(function loadBG() {
+  const bg = localStorage.getItem("bgColor");
+  if (bg) document.body.style.background = bg;
+})();
+
+/* ------------------------------
+   2. BOARD THEMES (4 types)
+------------------------------ */
+document.querySelectorAll("#board-themes .color-item").forEach(item => {
+  item.addEventListener("click", () => {
+    const theme = item.dataset.theme;
+
+    boardEl.classList.remove("classic","high-contrast","cbf","mono");
+    boardEl.classList.add(theme);
+
+    localStorage.setItem("boardTheme", theme);
+    renderBoard();
+  });
+});
+
+/* Load board theme on startup */
+(function loadBoardTheme() {
+  const t = localStorage.getItem("boardTheme") || "high-contrast";
+  boardEl.classList.add(t);
+})();
+
+/* ------------------------------
+   PIECE STYLE: Neo / Alpha
+------------------------------ */
+document.querySelectorAll("#piece-style .piece-item").forEach(item => {
+  item.addEventListener("click", () => {
+    currentPieceSet = item.dataset.piece;
+    localStorage.setItem("pieceStyle", currentPieceSet);
+    renderBoard(); // instant refresh
+  });
+});
+
+document.querySelectorAll("#piece-style .piece-item").forEach(item => {
+  item.addEventListener("click", () => {
+    currentPieceSet = item.dataset.piece;
+    localStorage.setItem('pieceStyle', currentPieceSet);
+    renderBoard();
+  });
+});
+
+/* ============================================================
+   12. BOOTSTRAP APPLICATION
+   ============================================================ */
+
+// Initialize game
+loadFromFEN(START_FEN);
+updateStatus();
+renderAll();
